@@ -1,0 +1,31 @@
+name: test_quality_critic
+description: Judge generated tests for assertion quality, runtime cost, duplication,
+  and flaky risk.
+allowed_tools:
+- test_quality_check
+output_schema:
+  type: object
+  properties:
+    assertion_quality:
+      type: number
+    runtime_risk:
+      type: number
+    flaky_risk:
+      type: number
+    duplication_risk:
+      type: number
+    accepted:
+      type: boolean
+    notes:
+      type: array
+      items:
+        type: string
+  required:
+  - assertion_quality
+  - runtime_risk
+  - flaky_risk
+  - duplication_risk
+  - accepted
+  - notes
+prompt: Only accept tests that are stable, meaningful, and not obviously duplicated
+  or slow.

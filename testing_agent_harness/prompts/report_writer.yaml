@@ -1,0 +1,30 @@
+name: report_writer
+description: Generate the final human-readable and machine-readable report payload.
+allowed_tools:
+- diff_workspace
+output_schema:
+  type: object
+  properties:
+    markdown:
+      type: string
+      description: Full Markdown report body, ready to save as report.md.
+    json_payload:
+      type: object
+      description: Structured summary of the run (free-form object).
+  required:
+  - markdown
+  - json_payload
+prompt: |
+  Write a full report that covers reproducibility, plan, workflow, improvements,
+  localization, repairs, diffs, and final judgement.
+
+  CRITICAL OUTPUT CONTRACT:
+    - "markdown"     : string containing the ACTUAL report body in Markdown.
+                       Include real section headers (## Overview, ## Results,
+                       ## Repairs, etc.) and human-readable prose. NOT a
+                       description of what the report would contain.
+    - "json_payload" : object with any structured summary fields you want to
+                       preserve (free-form, but must be a JSON object).
+
+  Do NOT return "report", "body", "text", or other aliases instead of
+  "markdown". Do NOT emit a schema/skeleton — produce the real report text.

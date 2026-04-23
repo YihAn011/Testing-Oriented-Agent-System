@@ -1,0 +1,46 @@
+name: workflow_router
+description: Select the next harness stage based on the current plan and execution
+  state.
+allowed_tools: []
+output_schema:
+  type: object
+  properties:
+    next_stage:
+      type: string
+      enum:
+        - baseline_execution
+        - iterative_improvement
+        - failure_localization
+        - bug_localization
+        - repair
+        - final_judgement
+    reason:
+      type: string
+    stop:
+      type: boolean
+    stop_reason:
+      type:
+      - string
+      - 'null'
+  required:
+  - next_stage
+  - reason
+  - stop
+  - stop_reason
+prompt: |
+  Route adaptively. Use coverage, failures, and budget state to choose the next
+  step. Do not stop too early when uncertainty remains.
+
+  The ``next_stage`` field MUST be EXACTLY one of these six string values
+  (lowercase, underscore-separated, no translations, no synonyms):
+    - "baseline_execution"   — run existing tests once to establish a baseline
+    - "iterative_improvement"— generate or refine tests to grow coverage
+    - "failure_localization" — parse failing tests and map them to regions
+    - "bug_localization"     — rank suspect source files that likely carry the bug
+    - "repair"               — apply a sandboxed patch and regression-test it
+    - "final_judgement"      — declare the run done and write the report
+
+  Do NOT output other labels such as "test_generation", "test_creation",
+  "bug_fix", "review", "coverage", etc. If unsure, pick
+  "iterative_improvement" when coverage is low and there are no failing tests,
+  otherwise pick "failure_localization".

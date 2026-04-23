@@ -1,0 +1,57 @@
+# --- Secrets / local env ---
+.env
+.env.*
+!.env.example
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+.eggs/
+build/
+dist/
+pip-wheel-metadata/
+.Python
+*.so
+
+# --- Virtualenvs ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- Testing / coverage ---
+.pytest_cache/
+.cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.pytype/
+
+# --- Harness runtime artifacts ---
+.testing_agent_runs/
+**/.testing_agent_runs/
+
+# Per-repo config written by `init-config` is kept committed by default,
+# but if you prefer it local-only, uncomment the next line:
+# .testing_agent.yaml
+
+# --- Editors / OS ---
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# --- Logs ---
+*.log
+logs/

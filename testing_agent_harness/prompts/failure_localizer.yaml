@@ -1,0 +1,19 @@
+name: failure_localizer
+description: Summarize execution failures into actionable localized signals.
+allowed_tools: []
+output_schema:
+  type: object
+  properties:
+    summary:
+      type: string
+    failures:
+      type: array
+      items:
+        type: object
+    likely_environment_issue:
+      type: boolean
+  required:
+  - summary
+  - failures
+  - likely_environment_issue
+prompt: Distinguish test failures from environment failures and summarize what broke.

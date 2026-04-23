@@ -1,0 +1,21 @@
+name: repair_decider
+description: Apply user preference and safety policy to decide if repair should happen
+  now.
+allowed_tools: []
+output_schema:
+  type: object
+  properties:
+    should_repair:
+      type: boolean
+    reason:
+      type: string
+    target_path:
+      type:
+      - string
+      - 'null'
+  required:
+  - should_repair
+  - reason
+  - target_path
+prompt: Honor repair preference, scope limits, and confidence thresholds before allowing
+  a patch.

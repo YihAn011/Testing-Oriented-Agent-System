@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "testing-agent-harness"
+version = "0.1.0"
+description = "CLI testing-oriented LLM agent harness with tools, skills, optional MCP bridge, and Gemini provider support"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "typer>=0.12",
+  "pydantic>=2.8",
+  "PyYAML>=6.0",
+  "coverage>=7.5",
+  "pytest>=8.0",
+]
+
+[project.scripts]
+test-agent = "testing_agent_harness.cli:main"
+
+[tool.setuptools.package-data]
+testing_agent_harness = ["prompts/*.yaml"]
+
+[tool.setuptools.packages.find]
+include = ["testing_agent_harness*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+addopts = "-q"
+testpaths = ["tests"]

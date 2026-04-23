@@ -1,0 +1,72 @@
+name: test_generation
+description: Generate targeted pytest tests for uncovered code and meaningful failure
+  triggers.
+allowed_tools:
+- ast_summary
+output_schema:
+  type: object
+  properties:
+    files:
+      type: array
+      items:
+        type: object
+        properties:
+          path:
+            type: string
+            description: Repository-relative path where the test file should live,
+              starting with "tests/" and ending in ".py".
+          content:
+            type: string
+            description: COMPLETE Python source code of the pytest test module. Must
+              be runnable as-is with ``python -m pytest``.
+        required:
+        - path
+        - content
+    rationale:
+      type: string
+    iteration_goal:
+      type: string
+  required:
+  - files
+  - rationale
+  - iteration_goal
+prompt: |
+  Generate focused pytest tests that improve coverage without bloating the suite.
+  Prefer strong assertions and stable inputs.
+
+  THE INPUT CONTAINS ``source_files``: a map from repo-relative path to the
+  exact current source of every source file. You MUST use it to determine:
+    - the real module path for ``import`` (e.g. ``from pkg.core import add``);
+    - the REAL function names and signatures that currently exist in that code;
+    - the REAL parameter count and return semantics.
+  Do NOT import symbols that are not present in ``source_files``. Do NOT
+  invent function signatures. If a function takes two arguments, call it with
+  two arguments; do not guess defaults that aren't there.
+
+  CRITICAL OUTPUT CONTRACT — read carefully:
+
+  Each element of ``files`` MUST be an object with EXACTLY these two keys:
+    - "path"    : string, repo-relative, starts with "tests/", ends with ".py"
+                  (e.g. "tests/test_core_generated.py").
+    - "content" : string containing the FULL Python source of a pytest file,
+                  including all ``import`` statements and test functions. It
+                  must be valid Python and runnable via ``python -m pytest``.
+
+  Do NOT replace ``content`` with metadata like ``test_coverage``, ``functions``,
+  ``test_cases``, or a description of what the tests would do. We need the
+  ACTUAL code, not a plan. If you are unsure what to write, emit a minimal
+  pytest file that at least imports the target module and asserts something
+  concrete.
+
+  Example shape (illustrative only):
+
+  {
+    "files": [
+      {
+        "path": "tests/test_core_generated.py",
+        "content": "import pytest\nfrom buggy_calc.core import multiply\n\ndef test_multiply_basic():\n    assert multiply(2, 3) == 6\n"
+      }
+    ],
+    "rationale": "Covers multiply() which was 0% covered.",
+    "iteration_goal": "Raise coverage of core.py toward target."
+  }

@@ -1,0 +1,41 @@
+name: final_judge
+description: Judge whether the original testing goal has been achieved.
+allowed_tools: []
+output_schema:
+  type: object
+  properties:
+    goal_achieved:
+      type: boolean
+    summary:
+      type: string
+    unmet_goals:
+      type: array
+      items:
+        type: string
+    remaining_risks:
+      type: array
+      items:
+        type: string
+    recommended_next_actions:
+      type: array
+      items:
+        type: string
+  required:
+  - goal_achieved
+  - summary
+  - unmet_goals
+  - remaining_risks
+  - recommended_next_actions
+prompt: |
+  Make a final judgement using the plan, current results, remaining uncertainty,
+  and safety constraints.
+
+  CRITICAL OUTPUT CONTRACT — use EXACTLY these keys at the top level:
+    - "goal_achieved"            : boolean (true/false), NOT a string.
+    - "summary"                  : string, 1-3 sentences explaining the verdict.
+    - "unmet_goals"              : array of strings (may be empty).
+    - "remaining_risks"          : array of strings (may be empty).
+    - "recommended_next_actions" : array of strings (may be empty).
+
+  Do NOT use aliases like "achieved", "verdict", "success", "next_steps",
+  "todo", or "risks". Do NOT wrap the response in an extra object.

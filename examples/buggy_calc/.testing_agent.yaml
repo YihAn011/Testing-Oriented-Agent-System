@@ -1,0 +1,43 @@
+model:
+  provider: openai_compatible
+  model_name: qwen3
+  api_key_env: OPENAI_API_KEY
+  base_url: http://127.0.0.1:11434/v1
+  temperature: 0.0
+  max_tool_turns: 4
+  timeout_seconds: 180
+  max_output_tokens: 1536
+  num_ctx: 4096
+budget:
+  fast_mode: true
+  max_iterations: 1
+  max_runtime_minutes: 5
+  max_tool_calls: 40
+  max_replans: 0
+  max_failed_repairs: 1
+policy:
+  repair_mode: auto
+  apply_accepted_patch_to_original: false
+  allow_test_modification: true
+  allow_code_repair: true
+  allowed_code_paths:
+  - src
+  - app
+  - package
+  - .
+  blocked_globs:
+  - .git/*
+  - .venv/*
+  - venv/*
+  - dist/*
+  - build/*
+  - __pycache__/*
+  require_regression_after_change: false
+  require_diff_review: false
+goals:
+  user_goal: Run the project's tests, improve targeted Python tests, localize failures,
+    and optionally repair bugs safely.
+  target_line_coverage: 0.85
+  stop_when_tests_pass: true
+  require_reproducibility_manifest: true
+  generate_final_report: true

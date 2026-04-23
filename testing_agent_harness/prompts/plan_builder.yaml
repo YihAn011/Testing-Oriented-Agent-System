@@ -1,0 +1,81 @@
+name: plan_builder
+description: Produce the global testing plan before iterative execution begins.
+allowed_tools: []
+output_schema:
+  type: object
+  properties:
+    goal:
+      type: string
+    scope:
+      type: array
+      items:
+        type: string
+    constraints:
+      type: array
+      items:
+        type: string
+    target_coverage:
+      type: number
+    workflow:
+      type: array
+      items:
+        type: object
+        properties:
+          stage:
+            type: string
+            description: Unique lowercase id of the stage (e.g. "bootstrap", "baseline_execution", "iterative_improvement", "bug_localization", "repair", "final_judgement").
+          objective:
+            type: string
+          success_criteria:
+            type: array
+            items:
+              type: string
+          stop_conditions:
+            type: array
+            items:
+              type: string
+          preferred_skills:
+            type: array
+            items:
+              type: string
+          preferred_tools:
+            type: array
+            items:
+              type: string
+        required:
+        - stage
+        - objective
+        - success_criteria
+        - stop_conditions
+    done_definition:
+      type: array
+      items:
+        type: string
+    risk_flags:
+      type: array
+      items:
+        type: string
+  required:
+  - goal
+  - scope
+  - constraints
+  - target_coverage
+  - workflow
+  - done_definition
+  - risk_flags
+prompt: |
+  Build a testing plan with explicit stages, objectives, stop conditions, and a
+  done definition.
+
+  IMPORTANT: The ``workflow`` field MUST be an array of objects where EACH
+  object uses EXACTLY these keys (no renaming, no translations):
+    - "stage"              (string; lowercase id, e.g. "bootstrap")
+    - "objective"          (string)
+    - "success_criteria"   (array of strings)
+    - "stop_conditions"    (array of strings)
+    - "preferred_skills"   (optional array of strings)
+    - "preferred_tools"    (optional array of strings)
+
+  Do NOT use alternative keys such as "phase", "name", "title", "criteria",
+  "conditions", or "tools". Do NOT wrap the plan in extra fields. Output a
+  single JSON object matching the provided schema.

@@ -1,0 +1,65 @@
+name: bug_localizer
+description: Rank likely buggy code locations and decide if repair is justified.
+allowed_tools:
+- suspect_files
+output_schema:
+  type: object
+  properties:
+    summary:
+      type: string
+    candidates:
+      type: array
+      items:
+        type: object
+        properties:
+          path:
+            type: string
+            description: Repository-relative source file path (e.g. "src/foo/bar.py").
+          confidence:
+            type: number
+            description: Suspicion score between 0.0 (unlikely) and 1.0 (almost certainly buggy).
+          reasons:
+            type: array
+            items:
+              type: string
+        required:
+        - path
+        - confidence
+    should_repair:
+      type: boolean
+    confidence:
+      type: number
+  required:
+  - summary
+  - candidates
+  - should_repair
+  - confidence
+prompt: |
+  Localize likely bug sites from failure evidence and coverage context. Keep
+  repair conservative.
+
+  THE INPUT CONTAINS ``candidate_paths`` — the authoritative list of source
+  files that EXIST in the sandbox, plus ``source_files`` with the actual
+  content of each. You MUST pick every ``path`` VERBATIM from
+  ``candidate_paths``. Do NOT shorten, rename, or drop directory segments
+  (e.g. do NOT collapse ``src/buggy_calc/core.py`` to ``src/core.py``).
+  Any path not present in ``candidate_paths`` will be rejected.
+
+  CRITICAL OUTPUT CONTRACT:
+
+  Each element of ``candidates`` MUST be an object with these exact keys:
+    - "path"       : string, copied EXACTLY from ``candidate_paths``.
+    - "confidence" : number in the CLOSED interval [0.0, 1.0]. Do NOT use
+                     "score", "probability", "weight", or values > 1.0.
+    - "reasons"    : optional array of short strings explaining the suspicion.
+
+  Example shape:
+
+  {
+    "summary": "Divide function returns wrong value on zero denominator.",
+    "candidates": [
+      {"path": "src/foo/bar.py", "confidence": 0.8, "reasons": ["fails divide-by-zero test"]}
+    ],
+    "should_repair": true,
+    "confidence": 0.8
+  }

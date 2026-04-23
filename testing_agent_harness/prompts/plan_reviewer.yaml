@@ -1,0 +1,20 @@
+name: plan_reviewer
+description: Review the generated plan and approve or request revision.
+allowed_tools: []
+output_schema:
+  type: object
+  properties:
+    approved:
+      type: boolean
+    issues:
+      type: array
+      items:
+        type: string
+    revised_plan:
+      type: object
+  required:
+  - approved
+  - issues
+  - revised_plan
+prompt: Check the plan against the seven structural requirements. Reject plans that
+  miss stop rules, reporting, or reproducibility.

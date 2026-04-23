@@ -1,0 +1,63 @@
+name: repair_patch
+description: Produce a minimal sandbox-only patch for a localized bug.
+allowed_tools:
+- read_file
+output_schema:
+  type: object
+  properties:
+    changes:
+      type: array
+      items:
+        type: object
+        properties:
+          path:
+            type: string
+            description: Repository-relative file to overwrite (e.g. "src/pkg/core.py").
+          content:
+            type: string
+            description: COMPLETE new source of the file after the fix. Must be valid
+              Python (or the project's language) and runnable as-is.
+          rationale:
+            type: string
+        required:
+        - path
+        - content
+    rationale:
+      type: string
+    regression_required:
+      type: boolean
+  required:
+  - changes
+  - rationale
+  - regression_required
+prompt: |
+  Create the smallest safe patch that addresses the localized bug without broad
+  behavior changes.
+
+  THE INPUT CONTAINS THE EXACT CURRENT SOURCE of the target file in the
+  ``current_content`` field (and other related source files in
+  ``source_files``). You MUST base your patch on that exact text.
+
+  HARD RULES — violating any of these will break the project:
+    1. Start from ``current_content`` VERBATIM. Copy every function, class,
+       import, type hint, docstring, and blank line EXACTLY as shown.
+    2. Change ONLY the minimal lines needed to fix the bug identified in
+       ``bug_localization`` / ``failures``. Everything else stays byte-for-byte.
+    3. DO NOT delete, rename, or reorder any top-level symbol (function/class)
+       that appears in ``current_content``. Other files and tests import them.
+    4. DO NOT remove parameter type hints, return type hints, or existing
+       guard clauses (e.g. ``if b == 0``) unless removing them IS the fix.
+    5. If ``current_content`` is empty, do not invent one — return an empty
+       ``changes`` array with an explanatory ``rationale``.
+
+  CRITICAL OUTPUT CONTRACT:
+
+  Each element of ``changes`` MUST be an object with EXACTLY these keys:
+    - "path"      : string, repo-relative path of the file being rewritten.
+    - "content"   : string, FULL replacement source of that file — not a diff,
+                    not a patch hunk, not a description. Include every line.
+    - "rationale" : optional string describing the minimal fix.
+
+  Do NOT emit ``diff``, ``patch``, ``hunks``, ``description``, or bare
+  explanations in place of ``content``. The harness will overwrite the target
+  file verbatim with whatever you put in ``content``.

@@ -1,0 +1,31 @@
+name: environment_bootstrap
+description: Create the reproducibility baseline before any testing work starts.
+allowed_tools:
+- project_scan
+- build_manifest
+output_schema:
+  type: object
+  properties:
+    project_scan:
+      type: object
+      description: The OBJECT returned by the ``project_scan`` tool, passed through verbatim.
+    manifest:
+      type: object
+      description: The OBJECT returned by the ``build_manifest`` tool, passed through verbatim.
+    notes:
+      type: array
+      items:
+        type: string
+  required:
+  - project_scan
+  - manifest
+  - notes
+prompt: |
+  Establish a clear reproducible setup. Confirm project type, dependencies,
+  test entry points, and sandbox constraints.
+
+  Call the ``project_scan`` tool and then the ``build_manifest`` tool (passing
+  fields from ``project_scan`` as arguments). In your final JSON response,
+  place the FULL tool outputs verbatim under "project_scan" and "manifest" —
+  do NOT summarize, rename, or drop fields. ``notes`` is a short array of
+  strings describing any assumptions.
