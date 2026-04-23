@@ -22,11 +22,21 @@ output_schema:
       type:
       - string
       - 'null'
+    state_trace:
+      type: array
+      items:
+        type: string
+    decision_trace:
+      type: array
+      items:
+        type: string
   required:
   - next_stage
   - reason
   - stop
   - stop_reason
+  - state_trace
+  - decision_trace
 prompt: |
   Route adaptively. Use coverage, failures, and budget state to choose the next
   step. Do not stop too early when uncertainty remains.
@@ -44,3 +54,7 @@ prompt: |
   "bug_fix", "review", "coverage", etc. If unsure, pick
   "iterative_improvement" when coverage is low and there are no failing tests,
   otherwise pick "failure_localization".
+
+  Populate ``state_trace`` with 2-4 short observations about the current run
+  state and ``decision_trace`` with 1-3 short bullets explaining why the chosen
+  next stage is the best fit right now. Keep both concise.

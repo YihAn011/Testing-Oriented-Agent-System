@@ -184,6 +184,7 @@ class RunState(BaseModel):
     manifest: ReproducibilityManifest | None = None
     plan: TestPlan | None = None
     baseline_result: TestRunResult | None = None
+    baseline_failures: FailureSummary | None = None
     latest_test_result: TestRunResult | None = None
     latest_failures: FailureSummary | None = None
     bug_localization: BugLocalization | None = None
@@ -191,6 +192,10 @@ class RunState(BaseModel):
     generated_tests: list[FileChange] = Field(default_factory=list)
     repairs: list[FileChange] = Field(default_factory=list)
     route_history: list[RouteDecision] = Field(default_factory=list)
+    baseline_failure_fingerprints: list[str] = Field(default_factory=list)
+    current_failure_fingerprints: list[str] = Field(default_factory=list)
+    post_repair_green_reached: bool = False
+    generated_test_failures_only: bool = False
     events_path: str | None = None
     report_markdown: str | None = None
     report_json_path: str | None = None

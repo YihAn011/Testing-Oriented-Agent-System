@@ -87,6 +87,9 @@ def plan_repo(
     repo_path = repo_path.resolve()
     config = _load_effective_config(repo_path, config_path, provider, None, goal, target_coverage, False)
     harness = TestingHarness(repo_path=repo_path, config=config)
+    from .chat import _attach_live_reporter
+
+    _attach_live_reporter(harness)
     harness.bootstrap()
     harness.plan()
     typer.echo(f"Run ID: {harness.run_id}")
@@ -117,6 +120,9 @@ def run_repo(
     elif config.policy.repair_mode == "ask" or repair_mode == "ask":
         config.policy.repair_mode = _prompt_repair_mode(config.policy.repair_mode)
     harness = TestingHarness(repo_path=repo_path, config=config)
+    from .chat import _attach_live_reporter
+
+    _attach_live_reporter(harness)
     state = harness.run_full()
     typer.echo(f"Run ID: {state.run_id}")
     typer.echo(f"Artifacts: {harness.run_dir}")

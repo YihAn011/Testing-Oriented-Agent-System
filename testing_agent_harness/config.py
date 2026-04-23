@@ -45,11 +45,9 @@ class BudgetConfig:
     max_tool_calls: int = 100
     max_replans: int = 2
     max_failed_repairs: int = 2
-    # Fast mode collapses the pipeline into ~2-4 LLM calls by replacing
-    # optional narrative skills (plan review, workflow routing, failure
-    # localizer narrative, repair decider, final judge, report writer, test
-    # quality critic) with deterministic Python logic. Dramatically speeds up
-    # small models such as qwen3:4b. Disable for maximum LLM-driven behaviour.
+    # Fast mode keeps the key orchestration skills LLM-driven, but shrinks
+    # their payloads, skips non-essential review passes, and reserves
+    # deterministic logic for parsing, validation, and safe fallbacks.
     fast_mode: bool = True
 
 

@@ -43,6 +43,23 @@ prompt: |
   invent function signatures. If a function takes two arguments, call it with
   two arguments; do not guess defaults that aren't there.
 
+  The input may also contain:
+    - ``existing_tests``     : the current pytest files already present
+    - ``baseline_failures``  : failures from the first baseline run
+    - ``repairs``            : repairs already accepted earlier in this run
+
+  These are semantic anchors. Generated tests MUST reinforce behavior that is
+  already evidenced by existing tests, failure traces, docs/comments in the
+  source, or by a repair that was clearly made to satisfy an existing failing
+  test. Do NOT invent a new gameplay rule, API contract, or domain policy just
+  because the current implementation could support it.
+
+  If the suite already turned green after a repair, be especially conservative:
+    - prefer branch/edge coverage of the same repaired behavior;
+    - prefer public behavior over helper-internal policy assertions;
+    - avoid adding tests that would force another production-code change unless
+      that behavior is already established by the repo.
+
   CRITICAL OUTPUT CONTRACT — read carefully:
 
   Each element of ``files`` MUST be an object with EXACTLY these two keys:
@@ -57,6 +74,13 @@ prompt: |
   ACTUAL code, not a plan. If you are unsure what to write, emit a minimal
   pytest file that at least imports the target module and asserts something
   concrete.
+
+  Reject these bad patterns:
+    - asserting a new rule that is absent from ``existing_tests`` and
+      ``baseline_failures``;
+    - replacing a strong existing regression test with a different weaker one;
+    - targeting helper functions only because they are easy to call, without
+      tying them to observable product behavior.
 
   Example shape (illustrative only):
 

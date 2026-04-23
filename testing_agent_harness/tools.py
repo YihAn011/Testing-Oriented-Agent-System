@@ -228,6 +228,7 @@ class ProjectScanTool(Tool):
 
     def run(self, ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
         root = ctx.sandbox_path
+        python_cmd = f"\"{sys.executable}\"" if sys.executable else "python3"
         root_files = [p.name for p in root.iterdir() if p.is_file()]
         test_files = [str(p.relative_to(root)) for p in root.rglob("test*.py")] + [str(p.relative_to(root)) for p in root.rglob("*_test.py")]
         source_files = [str(p.relative_to(root)) for p in root.rglob("*.py") if "tests" not in p.parts]
@@ -239,11 +240,11 @@ class ProjectScanTool(Tool):
         if (root / "pyproject.toml").exists() or (root / "setup.py").exists() or (root / "setup.cfg").exists():
             project_type = "python"
             package_manager = "pip"
-            discovered_commands.extend(["python -m pytest -q", "python -m coverage run -m pytest -q"])
+            discovered_commands.extend([f"{python_cmd} -m pytest -q", f"{python_cmd} -m coverage run -m pytest -q"])
         if (root / "tox.ini").exists():
-            discovered_commands.append("python -m tox -q")
+            discovered_commands.append(f"{python_cmd} -m tox -q")
         if (root / "noxfile.py").exists():
-            discovered_commands.append("python -m nox")
+            discovered_commands.append(f"{python_cmd} -m nox")
         for path in root.rglob("*.py"):
             if any(part in {".venv", "venv", "__pycache__"} for part in path.parts):
                 continue
@@ -283,6 +284,7 @@ class BuildManifestTool(Tool):
 
     def run(self, ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
         root = ctx.sandbox_path
+        python_cmd = f"\"{sys.executable}\"" if sys.executable else "python3"
         dependencies: list[DependencyRecord] = []
         install_commands: list[CommandRecord] = []
         test_commands: list[CommandRecord] = []
@@ -294,14 +296,14 @@ class BuildManifestTool(Tool):
         dependencies.extend(self._parse_requirements(root / "test-requirements.txt"))
 
         if (root / "pyproject.toml").exists() or (root / "setup.py").exists() or (root / "setup.cfg").exists():
-            install_commands.append(CommandRecord(name="editable_install", command="python -m pip install -e .", status="candidate"))
+            install_commands.append(CommandRecord(name="editable_install", command=f"{python_cmd} -m pip install -e .", status="candidate"))
         for req_name in ["requirements.txt", "requirements-dev.txt", "test-requirements.txt"]:
             if (root / req_name).exists():
-                install_commands.append(CommandRecord(name=f"install_{req_name}", command=f"python -m pip install -r {req_name}", status="candidate"))
+                install_commands.append(CommandRecord(name=f"install_{req_name}", command=f"{python_cmd} -m pip install -r {req_name}", status="candidate"))
 
         pytest_target = "tests" if (root / "tests").exists() else "."
-        test_commands.append(CommandRecord(name="pytest", command=f"python -m pytest -q {pytest_target}", status="candidate"))
-        coverage_commands.append(CommandRecord(name="coverage_pytest", command=f"python -m coverage run -m pytest -q {pytest_target}", status="candidate"))
+        test_commands.append(CommandRecord(name="pytest", command=f"{python_cmd} -m pytest -q {pytest_target}", status="candidate"))
+        coverage_commands.append(CommandRecord(name="coverage_pytest", command=f"{python_cmd} -m coverage run -m pytest -q {pytest_target}", status="candidate"))
         test_entry_points.append(pytest_target)
 
         manifest = ReproducibilityManifest(
@@ -420,8 +422,9 @@ class RunCoverageTool(Tool):
         cov_file = ctx.run_dir / json_path
         cov_file.parent.mkdir(parents=True, exist_ok=True)
         command = args["command"]
+        python_cmd = f"\"{sys.executable}\"" if sys.executable else "python3"
         if "coverage json" not in command:
-            command = f"{command} && python -m coverage json -o {cov_file.as_posix()}"
+            command = f"{command} && {python_cmd} -m coverage json -o {cov_file.as_posix()}"
         result = ShellExecTool().run(ctx, {"command": command, "timeout": args.get("timeout", 1200)})
         coverage = CoverageSnapshot(total_percent=0.0, files=[], raw_json_path=str(cov_file))
         if cov_file.exists():
@@ -489,7 +492,7 @@ class FailureParseTool(Tool):
     description = "Parse pytest output into structured failures and distinguish likely environment failures."
     schema = {"type": "object", "properties": {}, "required": []}
 
-    FAILURE_PATTERN = re.compile(r"FAILED\s+(.+?)\s+-\s+(.+)")
+    FAILURE_PATTERN = re.compile(r"FAILED\s+(.+?)(?:\s+-\s+(.+))?$")
     TRACE_FILE_PATTERN = re.compile(r"^(.*\.py):(\d+):\s+(?:in\s+(.+))?")
 
     def run(self, ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
@@ -502,19 +505,21 @@ class FailureParseTool(Tool):
         current_name: str | None = None
         current_message: str | None = None
         for raw_line in text.splitlines():
-            line = raw_line.strip("\n")
+            line = raw_line.rstrip("\n")
             match = self.FAILURE_PATTERN.search(line)
             if match:
-                if current_name and current_message:
-                    failures.append(FailureItem(test_name=current_name, message=current_message, stack_excerpt=current_stack[:12], failure_type=self._infer_failure_type(current_message)))
-                current_name = match.group(1)
-                current_message = match.group(2)
+                if current_name:
+                    message = current_message or "Test failed."
+                    failures.append(FailureItem(test_name=current_name, message=message, stack_excerpt=current_stack[:12], failure_type=self._infer_failure_type(message)))
+                current_name = match.group(1).strip()
+                current_message = (match.group(2) or "").strip() or "Test failed."
                 current_stack = []
                 continue
             if current_name and line:
                 current_stack.append(line)
-        if current_name and current_message:
-            failures.append(FailureItem(test_name=current_name, message=current_message, stack_excerpt=current_stack[:12], failure_type=self._infer_failure_type(current_message)))
+        if current_name:
+            message = current_message or "Test failed."
+            failures.append(FailureItem(test_name=current_name, message=message, stack_excerpt=current_stack[:12], failure_type=self._infer_failure_type(message)))
         suspected_environment_issue = any(token in text.lower() for token in ["modulenotfounderror", "no module named", "command not found", "could not find", "importerror"])
         summary = FailureSummary(
             failures=failures,
@@ -571,7 +576,12 @@ class QualityCheckTool(Tool):
     description = "Evaluate generated test files for assertion quality, runtime cost, duplication, and flaky risk."
     schema = {
         "type": "object",
-        "properties": {"files": {"type": "array", "items": {"type": "object"}}},
+        "properties": {
+            "files": {"type": "array", "items": {"type": "object"}},
+            "baseline_failures": {"type": "object"},
+            "existing_tests": {"type": "object"},
+            "post_repair_green_reached": {"type": "boolean"},
+        },
         "required": ["files"],
     }
 
@@ -580,11 +590,19 @@ class QualityCheckTool(Tool):
         runtime_risk = 0.0
         flaky_risk = 0.0
         duplication_risk = 0.0
+        semantic_drift_risk = 0.0
         notes: list[str] = []
-        existing_tests = "\n".join(
-            safe_read_text(path, max_chars=4000)
-            for path in [ctx.sandbox_path / rel for rel in relative_files(ctx.sandbox_path) if rel.startswith("tests/") and rel.endswith(".py")]
-        )
+        supplied_tests = args.get("existing_tests")
+        if isinstance(supplied_tests, dict) and supplied_tests:
+            existing_tests = "\n".join(str(v) for v in supplied_tests.values() if isinstance(v, str))
+        else:
+            existing_tests = "\n".join(
+                safe_read_text(path, max_chars=4000)
+                for path in [ctx.sandbox_path / rel for rel in relative_files(ctx.sandbox_path) if rel.startswith("tests/") and rel.endswith(".py")]
+            )
+        baseline_failures = args.get("baseline_failures") if isinstance(args.get("baseline_failures"), dict) else {}
+        baseline_text = json.dumps(baseline_failures, sort_keys=True)
+        post_repair_green_reached = bool(args.get("post_repair_green_reached"))
         input_files = [item for item in args.get("files", []) if isinstance(item, dict)]
         valid_files = [item for item in input_files if isinstance(item.get("content"), str) and item["content"].strip()]
         skipped = len(input_files) - len(valid_files)
@@ -606,16 +624,32 @@ class QualityCheckTool(Tool):
             if content[:500] and content[:500] in existing_tests:
                 duplication_risk += 0.8
                 notes.append(f"{item['path']}: possible duplication with existing tests")
+            if post_repair_green_reached:
+                drift_hits = 0
+                for token in ["turn(", "hits_wall(", "next_head(", "render("]:
+                    if token in content and token not in existing_tests and token not in baseline_text:
+                        drift_hits += 1
+                if drift_hits:
+                    semantic_drift_risk += min(1.0, 0.25 * drift_hits)
+                    notes.append(f"{item['path']}: introduces assertions on behavior not evidenced by existing tests or baseline failures")
         assertion_quality = max(0.0, min(1.0, assertion_score / total_files))
         runtime_risk = max(0.0, min(1.0, runtime_risk / total_files))
         flaky_risk = max(0.0, min(1.0, flaky_risk / total_files))
         duplication_risk = max(0.0, min(1.0, duplication_risk / total_files))
-        accepted = assertion_quality >= 0.4 and runtime_risk <= 0.8 and flaky_risk <= 0.8 and duplication_risk <= 0.8
+        semantic_drift_risk = max(0.0, min(1.0, semantic_drift_risk / total_files))
+        accepted = (
+            assertion_quality >= 0.4
+            and runtime_risk <= 0.8
+            and flaky_risk <= 0.8
+            and duplication_risk <= 0.8
+            and semantic_drift_risk <= 0.6
+        )
         return {
             "assertion_quality": round(assertion_quality, 3),
             "runtime_risk": round(runtime_risk, 3),
             "flaky_risk": round(flaky_risk, 3),
             "duplication_risk": round(duplication_risk, 3),
+            "semantic_drift_risk": round(semantic_drift_risk, 3),
             "accepted": accepted,
             "notes": notes,
         }

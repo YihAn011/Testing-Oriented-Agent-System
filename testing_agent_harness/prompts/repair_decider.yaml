@@ -13,9 +13,24 @@ output_schema:
       type:
       - string
       - 'null'
+    decision_trace:
+      type: array
+      items:
+        type: string
+    safety_checks:
+      type: array
+      items:
+        type: string
   required:
   - should_repair
   - reason
   - target_path
-prompt: Honor repair preference, scope limits, and confidence thresholds before allowing
-  a patch.
+  - decision_trace
+  - safety_checks
+prompt: |
+  Honor repair preference, scope limits, and confidence thresholds before
+  allowing a patch.
+
+  Populate ``decision_trace`` with 1-3 short bullets explaining the main
+  decision and ``safety_checks`` with 1-3 short bullets describing what you
+  verified before allowing or blocking repair. Keep both concise.

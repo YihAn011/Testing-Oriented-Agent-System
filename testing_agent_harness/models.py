@@ -21,6 +21,7 @@ class ProviderError(RuntimeError):
 
 
 RETRYABLE_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504, 529})
+ORCHESTRATOR_SKILLS = frozenset({"plan_builder", "workflow_router", "bug_localizer", "repair_decider"})
 
 
 def _default_retry_reporter(msg: str) -> None:
@@ -370,7 +371,10 @@ class MockProvider(BaseProvider):
         source = tool_registry.invoke("read_file", ctx, {"path": target_path})["content"]
         updated = source
         rationale = "No patch applied."
-        if "def divide" in source and "return 0" in source:
+        if "def add" in source and "return a - b" in source:
+            updated = source.replace("    return a - b", "    return a + b")
+            rationale = "Restore add() to perform addition instead of subtraction."
+        elif "def divide" in source and "return 0" in source:
             updated = source.replace("        return 0", "        raise ZeroDivisionError('division by zero')")
             rationale = "Replace silent divide-by-zero handling with explicit ZeroDivisionError."
         return {
@@ -630,62 +634,95 @@ class OpenAICompatibleProvider(BaseProvider):
         logger: EventLogger,
         stage: str,
     ) -> dict[str, Any]:
-        schema_hint = json.dumps(spec.output_schema, ensure_ascii=False, indent=2)
+        started_at = time.perf_counter()
+        schema_hint = json.dumps(spec.output_schema, ensure_ascii=False, separators=(",", ":"))
+        payload_hint = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
         # /no_think disables Qwen3's <think> chain-of-thought, which otherwise
         # doubles every skill call. It is a no-op on other OpenAI-compatible
         # models. The instruction block below also forces JSON on the first
         # shot so we can skip the usual "repair JSON" second round-trip.
         system_text = (
-            f"You are the internal skill '{spec.name}'.\n"
-            f"Skill description: {spec.description}\n\n"
-            f"Instructions:\n{spec.prompt}\n\n"
-            "Return ONE JSON object that conforms EXACTLY to the schema below.\n"
-            "Output ONLY the JSON object: no markdown fences, no prose, no preamble.\n"
-            f"Schema:\n{schema_hint}\n\n"
+            f"Skill: {spec.name}\n"
+            f"Description: {spec.description}\n"
+            f"Instructions: {spec.prompt}\n"
+            "Return exactly one JSON object. No prose, no markdown, no preamble.\n"
+            f"Schema:{schema_hint}\n"
             "/no_think"
         )
         messages: list[dict[str, Any]] = [
             {
                 "role": "user",
-                "content": f"{system_text}\n\nInput JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}",
+                "content": f"{system_text}\nInput JSON:{payload_hint}",
             }
         ]
         allowed_tools = spec.allowed_tools or []
         openai_tools: list[dict[str, Any]] | None = None
-        # Fast mode already pre-feeds skills with source_files / current_content
-        # / failures, so the optional tool calls (ast_summary, read_file) would
-        # just slow the run down — and they also force the request off the
-        # streaming path, which kills the live token view. Skip them.
         fast_mode = getattr(self.config.budget, "fast_mode", False)
-        if allowed_tools and not fast_mode:
+        disable_tools_for_fast_stream = fast_mode and spec.name in ORCHESTRATOR_SKILLS
+        if allowed_tools and not disable_tools_for_fast_stream:
             openai_tools = [
                 {"type": "function", "function": decl}
                 for decl in tool_registry.list_schemas(allowed_tools)
             ]
         final_text = ""
         final_finish_reason = ""
+        skill_max_tokens = self._skill_max_tokens(spec.name)
+        streaming_orchestrator = fast_mode and spec.name in ORCHESTRATOR_SKILLS
         # When there are no tools, request strict JSON mode on the first shot
         # so Ollama / vLLM constrain the decoder and we skip the second call.
-        request_json_mode = not openai_tools
+        request_json_mode = not openai_tools and not streaming_orchestrator
         # Prefer streaming whenever we don't need server-side tool calls — it
         # lets the caller watch the model think live via ``token_callback``.
         prefer_stream = not openai_tools and self.token_callback is not None
-        for _ in range(self.config.model.max_tool_turns):
+        for turn in range(self.config.model.max_tool_turns):
+            if logger is not None:
+                logger.emit(
+                    stage,
+                    "provider",
+                    spec.name,
+                    "request",
+                    {
+                        "turn": turn + 1,
+                        "streaming": prefer_stream,
+                        "json_mode": request_json_mode,
+                        "max_tokens": skill_max_tokens,
+                        "tool_names": [item["function"]["name"] for item in openai_tools] if openai_tools else [],
+                        "payload_keys": sorted(payload),
+                    },
+                )
+            request_started = time.perf_counter()
             if prefer_stream:
                 data = self._chat_completions_streamed(
                     messages=messages,
                     json_mode=request_json_mode,
                     on_delta=self.token_callback,
+                    body_overrides={"max_tokens": skill_max_tokens},
                 )
             else:
                 data = self._chat_completions(
                     messages=messages,
                     tools=openai_tools,
                     json_mode=request_json_mode,
+                    body_overrides={"max_tokens": skill_max_tokens},
                 )
+            request_elapsed = time.perf_counter() - request_started
             choice0 = data["choices"][0]
             msg = choice0["message"]
             final_finish_reason = str(choice0.get("finish_reason") or "")
+            if logger is not None:
+                logger.emit(
+                    stage,
+                    "provider",
+                    spec.name,
+                    "response",
+                    {
+                        "turn": turn + 1,
+                        "finish_reason": final_finish_reason,
+                        "latency_seconds": round(request_elapsed, 3),
+                        "usage": data.get("usage") or {},
+                        "content_preview": truncate((msg.get("content") or "").strip(), 1200),
+                    },
+                )
             tool_calls = msg.get("tool_calls") or []
             if tool_calls:
                 request_json_mode = False  # tool round-trips cannot enforce JSON
@@ -729,36 +766,214 @@ class OpenAICompatibleProvider(BaseProvider):
             except Exception:  # noqa: BLE001 — fall through to the repair round
                 parsed = None
         if isinstance(parsed, dict):
+            if logger is not None:
+                logger.emit(
+                    stage,
+                    "provider",
+                    spec.name,
+                    "parsed",
+                    {
+                        "keys": sorted(parsed),
+                        "finish_reason": final_finish_reason,
+                        "latency_seconds": round(time.perf_counter() - started_at, 3),
+                    },
+                )
             return parsed
+
+        if streaming_orchestrator and not openai_tools:
+            compact_messages = list(messages)
+            compact_messages.append(
+                {
+                    "role": "user",
+                    "content": "Rewrite the answer now as one compact JSON object only. No prose, no markdown, no explanation.",
+                }
+            )
+            if logger is not None:
+                logger.emit(stage, "provider", spec.name, "retry_json_contract", {"max_tokens": skill_max_tokens})
+            if self.status_callback:
+                self.status_callback(f"{spec.name}: retrying with strict compact JSON")
+            if prefer_stream:
+                data_contract = self._chat_completions_streamed(
+                    messages=compact_messages,
+                    json_mode=True,
+                    on_delta=self.token_callback,
+                    body_overrides={"max_tokens": skill_max_tokens},
+                )
+            else:
+                data_contract = self._chat_completions(
+                    messages=compact_messages,
+                    tools=None,
+                    json_mode=True,
+                    body_overrides={"max_tokens": skill_max_tokens},
+                )
+            contract_text = (data_contract["choices"][0]["message"].get("content") or "").strip()
+            try:
+                parsed_contract = parse_llm_json_response(contract_text)
+            except Exception:  # noqa: BLE001
+                parsed_contract = None
+            if isinstance(parsed_contract, dict):
+                if logger is not None:
+                    logger.emit(
+                        stage,
+                        "provider",
+                        spec.name,
+                        "parsed",
+                        {
+                            "keys": sorted(parsed_contract),
+                            "finish_reason": data_contract["choices"][0].get("finish_reason"),
+                            "latency_seconds": round(time.perf_counter() - started_at, 3),
+                        },
+                    )
+                return parsed_contract
+            final_text = contract_text or final_text
 
         # Targeted retry: only when the model hit the output-token cap (so the
         # JSON is valid up to the truncation point). We double the budget and
         # try once more. We do NOT retry for other parse failures — that was
         # the slow path that dominated latency on small models.
         if final_finish_reason == "length" and not openai_tools:
-            doubled = int(getattr(self.config.model, "max_output_tokens", 1536) or 1536) * 2
+            status_cb = self.status_callback
+            doubled = max(skill_max_tokens * 2, int(getattr(self.config.model, "max_output_tokens", 1536) or 1536) * 2)
             retry_body_extras = {"max_tokens": doubled}
             if logger is not None:
                 logger.emit(stage, "provider", spec.name, "retry_length", {"max_tokens": doubled})
-            data2 = self._chat_completions(
-                messages=messages,
-                tools=None,
-                json_mode=True,
-                body_overrides=retry_body_extras,
-            )
+            if status_cb:
+                status_cb(f"{spec.name}: output truncated, retrying with larger budget ({doubled} tokens)")
+            if prefer_stream:
+                data2 = self._chat_completions_streamed(
+                    messages=messages,
+                    json_mode=True,
+                    on_delta=self.token_callback,
+                    body_overrides=retry_body_extras,
+                )
+            else:
+                data2 = self._chat_completions(
+                    messages=messages,
+                    tools=None,
+                    json_mode=True,
+                    body_overrides=retry_body_extras,
+                )
+            if logger is not None:
+                logger.emit(
+                    stage,
+                    "provider",
+                    spec.name,
+                    "response",
+                    {
+                        "turn": "retry_length",
+                        "finish_reason": data2["choices"][0].get("finish_reason"),
+                        "usage": data2.get("usage") or {},
+                        "content_preview": truncate((data2["choices"][0]["message"].get("content") or "").strip(), 1200),
+                    },
+                )
             text2 = (data2["choices"][0]["message"].get("content") or "").strip()
             try:
                 parsed2 = parse_llm_json_response(text2)
             except Exception:  # noqa: BLE001
                 parsed2 = None
             if isinstance(parsed2, dict):
+                if logger is not None:
+                    logger.emit(
+                        stage,
+                        "provider",
+                        spec.name,
+                        "parsed",
+                        {
+                            "keys": sorted(parsed2),
+                            "finish_reason": data2["choices"][0].get("finish_reason"),
+                            "latency_seconds": round(time.perf_counter() - started_at, 3),
+                        },
+                    )
                 return parsed2
+
+            compact_messages = list(messages)
+            compact_messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Previous answer was truncated or not valid JSON. "
+                        "Retry now with VERY COMPACT JSON only. "
+                        "Keep strings short, keep arrays minimal, no prose, no markdown, no explanation."
+                    ),
+                }
+            )
+            compact_budget = max(doubled, skill_max_tokens)
+            if logger is not None:
+                logger.emit(stage, "provider", spec.name, "retry_compact_json", {"max_tokens": compact_budget})
+            if status_cb:
+                status_cb(f"{spec.name}: retrying with compact JSON output")
+            if prefer_stream:
+                data3 = self._chat_completions_streamed(
+                    messages=compact_messages,
+                    json_mode=True,
+                    on_delta=self.token_callback,
+                    body_overrides={"max_tokens": compact_budget},
+                )
+            else:
+                data3 = self._chat_completions(
+                    messages=compact_messages,
+                    tools=None,
+                    json_mode=True,
+                    body_overrides={"max_tokens": compact_budget},
+                )
+            if logger is not None:
+                logger.emit(
+                    stage,
+                    "provider",
+                    spec.name,
+                    "response",
+                    {
+                        "turn": "retry_compact_json",
+                        "finish_reason": data3["choices"][0].get("finish_reason"),
+                        "usage": data3.get("usage") or {},
+                        "content_preview": truncate((data3["choices"][0]["message"].get("content") or "").strip(), 1200),
+                    },
+                )
+            text3 = (data3["choices"][0]["message"].get("content") or "").strip()
+            try:
+                parsed3 = parse_llm_json_response(text3)
+            except Exception:  # noqa: BLE001
+                parsed3 = None
+            if isinstance(parsed3, dict):
+                if logger is not None:
+                    logger.emit(
+                        stage,
+                        "provider",
+                        spec.name,
+                        "parsed",
+                        {
+                            "keys": sorted(parsed3),
+                            "finish_reason": data3["choices"][0].get("finish_reason"),
+                            "latency_seconds": round(time.perf_counter() - started_at, 3),
+                        },
+                    )
+                return parsed3
+            final_text = text3 or text2 or final_text
+
+        if self.status_callback:
+            self.status_callback(f"{spec.name}: JSON parsing failed after retries")
 
         raise ProviderError(
             f"Skill {spec.name} did not return parseable JSON on first shot "
             f"(finish_reason={final_finish_reason!r}). "
             f"Raw head: {truncate(final_text, 300)}"
         )
+
+    def _skill_max_tokens(self, skill_name: str) -> int:
+        base = int(getattr(self.config.model, "max_output_tokens", 1536) or 1536)
+        if skill_name == "workflow_router":
+            return min(base, 512)
+        if skill_name == "repair_decider":
+            return min(base, 448)
+        if skill_name == "plan_builder":
+            return min(base, 768)
+        if skill_name == "bug_localizer":
+            return min(max(base, 768), 1024)
+        if skill_name == "repair_patch":
+            return max(base, 4680)
+        if skill_name == "test_generation":
+            return max(base, 3072)
+        return base
 
     def _chat_completions(
         self,
@@ -855,6 +1070,7 @@ class OpenAICompatibleProvider(BaseProvider):
         response = self._open_stream_with_retry(request, on_status=status_cb)
         chunks: list[str] = []
         finish_reason = ""
+        in_reasoning = False
         try:
             for raw in response:
                 line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
@@ -872,8 +1088,18 @@ class OpenAICompatibleProvider(BaseProvider):
                     continue
                 choice = choices[0]
                 delta = choice.get("delta") or {}
+                reasoning_piece = delta.get("reasoning") or delta.get("reasoning_content") or ""
+                if reasoning_piece:
+                    if on_delta and not in_reasoning:
+                        on_delta("<think>")
+                    in_reasoning = True
+                    if on_delta:
+                        on_delta(reasoning_piece)
                 piece = delta.get("content") or ""
                 if piece:
+                    if on_delta and in_reasoning:
+                        on_delta("</think>")
+                    in_reasoning = False
                     chunks.append(piece)
                     if on_delta:
                         on_delta(piece)
@@ -883,6 +1109,8 @@ class OpenAICompatibleProvider(BaseProvider):
         except urllib.error.URLError as exc:
             raise ProviderError(f"Chat Completions stream error: {exc}") from exc
         finally:
+            if on_delta and in_reasoning:
+                on_delta("</think>")
             try:
                 response.close()
             except Exception:  # noqa: BLE001
@@ -934,6 +1162,7 @@ class OpenAICompatibleProvider(BaseProvider):
         if on_status:
             on_status("connecting")
         chunks: list[str] = []
+        in_reasoning = False
         # Retry only for connection establishment; once bytes start streaming we
         # let transport errors propagate.
         response = self._open_stream_with_retry(request, on_status=on_status)
@@ -959,14 +1188,26 @@ class OpenAICompatibleProvider(BaseProvider):
                 if not choices:
                     continue
                 delta = choices[0].get("delta") or {}
+                reasoning_piece = delta.get("reasoning") or delta.get("reasoning_content") or ""
+                if reasoning_piece:
+                    if on_delta and not in_reasoning:
+                        on_delta("<think>")
+                    in_reasoning = True
+                    if on_delta:
+                        on_delta(reasoning_piece)
                 piece = delta.get("content") or ""
                 if piece:
+                    if on_delta and in_reasoning:
+                        on_delta("</think>")
+                    in_reasoning = False
                     chunks.append(piece)
                     if on_delta:
                         on_delta(piece)
         except urllib.error.URLError as exc:
             raise ProviderError(f"Chat Completions stream error: {exc}") from exc
         finally:
+            if on_delta and in_reasoning:
+                on_delta("</think>")
             try:
                 response.close()
             except Exception:  # noqa: BLE001

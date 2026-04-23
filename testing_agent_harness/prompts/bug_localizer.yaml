@@ -29,14 +29,22 @@ output_schema:
       type: boolean
     confidence:
       type: number
+    evidence_trace:
+      type: array
+      items:
+        type: string
   required:
   - summary
   - candidates
   - should_repair
   - confidence
+  - evidence_trace
 prompt: |
   Localize likely bug sites from failure evidence and coverage context. Keep
   repair conservative.
+
+  Be concise. Prefer 1 candidate when one file is clearly implicated. Keep
+  ``summary`` to 1 short sentence and each reason to a short phrase.
 
   THE INPUT CONTAINS ``candidate_paths`` — the authoritative list of source
   files that EXIST in the sandbox, plus ``source_files`` with the actual
@@ -53,6 +61,9 @@ prompt: |
                      "score", "probability", "weight", or values > 1.0.
     - "reasons"    : optional array of short strings explaining the suspicion.
 
+  Do not include extra sections like ``analysis`` / ``fixes`` / ``workflow`` /
+  ``repair_plan``. Return the smallest valid JSON object only.
+
   Example shape:
 
   {
@@ -61,5 +72,9 @@ prompt: |
       {"path": "src/foo/bar.py", "confidence": 0.8, "reasons": ["fails divide-by-zero test"]}
     ],
     "should_repair": true,
-    "confidence": 0.8
+    "confidence": 0.8,
+    "evidence_trace": ["failure points at divide path", "candidate path exists in sandbox"]
   }
+
+  Populate ``evidence_trace`` with 2-4 short bullets summarizing the most
+  important evidence that drove your ranking.

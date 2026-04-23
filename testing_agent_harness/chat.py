@@ -481,6 +481,10 @@ def _attach_live_reporter(harness: TestingHarness) -> _LiveStageReporter:
         try:
             result = original_skill_run(skill_name, stage, ctx, payload)
             return result
+        except Exception as exc:
+            if not reporter.saw_any_tokens():
+                reporter.on_status(f"{skill_name}: {exc}")
+            raise
         finally:
             harness.provider.token_callback = None
             # If the provider took a non-streaming path (e.g. an internal

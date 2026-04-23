@@ -55,6 +55,10 @@ output_schema:
       type: array
       items:
         type: string
+    planning_trace:
+      type: array
+      items:
+        type: string
   required:
   - goal
   - scope
@@ -63,6 +67,7 @@ output_schema:
   - workflow
   - done_definition
   - risk_flags
+  - planning_trace
 prompt: |
   Build a testing plan with explicit stages, objectives, stop conditions, and a
   done definition.
@@ -79,3 +84,7 @@ prompt: |
   Do NOT use alternative keys such as "phase", "name", "title", "criteria",
   "conditions", or "tools". Do NOT wrap the plan in extra fields. Output a
   single JSON object matching the provided schema.
+
+  Populate ``planning_trace`` with 2-4 short bullets that summarize the key
+  planning considerations you used (for example: current failure state, test
+  command choice, or why repair should stay bounded). Keep each item concise.

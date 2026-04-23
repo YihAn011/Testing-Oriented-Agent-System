@@ -51,3 +51,65 @@ def test_percent_scale_is_squashed_into_unit_range() -> None:
     norm = _normalize_bug_localization(raw)
     decision = BugLocalization.model_validate(norm)
     assert decision.candidates[0].confidence == 0.8
+
+
+def test_nested_localization_shape_is_mapped_to_candidate() -> None:
+    raw = {
+        "localization": {
+            "file": "src/terminal_snake/game.py",
+            "reason": "Snake growth and wall collision logic are wrong.",
+        },
+        "repair_needed": True,
+        "repair_details": [
+            {"issue": "Snake not growing when eating food", "fix": "Keep the tail when food is eaten."},
+            {"issue": "Wall collision failure", "code_change": "Use >= for boundary checks."},
+        ],
+    }
+    norm = _normalize_bug_localization(raw)
+    decision = BugLocalization.model_validate(norm)
+    assert decision.summary == "Snake growth and wall collision logic are wrong."
+    assert decision.should_repair is True
+    assert decision.candidates[0].path == "src/terminal_snake/game.py"
+    assert decision.candidates[0].confidence == 0.5
+    assert "Snake not growing when eating food" in decision.candidates[0].reasons
+    assert "Use >= for boundary checks." in decision.candidates[0].reasons
+
+
+def test_buggy_code_locations_shape_is_mapped_to_candidate() -> None:
+    raw = {
+        "buggy_code_locations": [
+            {
+                "file": "src/terminal_snake/game.py",
+                "function": "turn",
+                "reason": "Opposite-direction handling is inconsistent with the requested behavior.",
+            }
+        ],
+        "repairs_justified": True,
+        "repair_description": "turn() should preserve the current state for opposite-direction commands.",
+    }
+    norm = _normalize_bug_localization(raw)
+    decision = BugLocalization.model_validate(norm)
+    assert decision.summary == "turn() should preserve the current state for opposite-direction commands."
+    assert decision.should_repair is True
+    assert decision.candidates[0].path == "src/terminal_snake/game.py"
+    assert decision.candidates[0].confidence == 0.5
+    assert "Opposite-direction handling is inconsistent with the requested behavior." in decision.candidates[0].reasons
+
+
+def test_buggy_files_and_lines_shape_is_mapped_to_candidates() -> None:
+    raw = {
+        "buggy_files": ["game.py"],
+        "buggy_lines": [
+            {"file": "game.py", "line": "new_snake = new_snake[:-1]"},
+            {"file": "game.py", "line": "return point.col > state.width"},
+        ],
+        "repairs_needed": True,
+    }
+    norm = _normalize_bug_localization(raw)
+    decision = BugLocalization.model_validate(norm)
+    assert decision.should_repair is True
+    assert decision.candidates[0].path == "game.py"
+    assert decision.candidates[0].confidence == 0.5
+    assert "new_snake = new_snake[:-1]" in decision.candidates[0].reasons
+    assert "return point.col > state.width" in decision.candidates[0].reasons
+    assert "game.py: new_snake = new_snake[:-1]" in decision.summary
