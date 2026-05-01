@@ -1,297 +1,212 @@
 # Testing-Oriented Agent System
 
-A CLI-based, process-driven agent that **plans, generates, runs, localizes, repairs, and reports** Python tests end-to-end, powered by a **local Qwen3** model through an OpenAI-compatible server (Ollama / vLLM / LM Studio / llama.cpp). No cloud key required.
+Repository: `https://github.com/YihAn011/Testing-Oriented-Agent-System.git`
 
-> **One repo, one command**:
-> ```bash
-> ./start.sh
-> ```
-> spins up the venv, installs deps, loads `.env`, and drops you into an interactive chat where `/run` drives the whole pipeline against any repository.
+This repository contains `testing-agent-harness`, a command-line testing-oriented agent harness for repository-level Python testing. The system treats testing as a staged process rather than a one-shot prompt. It scans a repository, builds a plan, runs baseline tests, parses failures, localizes likely bug files, optionally applies a sandboxed repair, refreshes coverage, and writes reproducible artifacts for later inspection.
 
----
+The final project report is the source of truth for the system description and evaluation. This README is aligned to that report and organized for repository handoff: what is in the repository, how to build and run it, what external software it builds on, and how to reproduce the evaluation.
 
-## Why this shape
+## What Is In The Repository
 
-This is **not** a free-form ReAct agent. The harness is the source of truth and the LLM is a constrained scheduler / reviewer. The paper-inspired pipeline is:
+- `README.md`: setup, run, and evaluation overview.
+- `ARCHITECTURE.md`: short architecture summary for the harness and workflow.
+- `testing_agent_harness/`: harness source code, CLI, tools, provider layer, schemas, and prompts.
+- `testing_agent_harness/prompts/`: YAML skill definitions and structured prompt files.
+- `examples/buggy_calc/`: bundled benchmark repository with a small arithmetic bug.
+- `examples/buggy_snake/`: bundled benchmark repository with gameplay logic bugs.
+- `tests/`: pytest suite for normalization, provider behavior, sandboxing, repair behavior, MCP bridge behavior, and related harness logic.
+- `docs/evaluation.md`: replication guide aligned to the final paper.
+- `docs/ai_usage.md`: AI tooling disclosure aligned to the final paper.
 
-1. **Environment & reproducibility** — build a manifest of how to run the repo.
-2. **Plan & goals** — structured objectives, budgets, workflows.
-3. **Workflow routing** — decide what to do next based on test state.
-4. **Test generation & iterative improvement** — grow coverage without regressions.
-5. **Execution feedback** — capture stdout/stderr/stack, trim, normalize.
-6. **Failure & bug localization** — rank suspects with path validation.
-7. **Repair** — minimal patch, rerun tests, **auto-revert if it doesn't help**.
-8. **Report** — Markdown + JSON artifacts + sandbox diff.
+## Repository Layout
 
-Every meaningful action is either a **deterministic tool** (Python) or a **skill** (LLM prompt with a strict output schema). The harness owns state, budgets, sandboxing, rollback, and logging.
+### Main package
 
----
+- `testing_agent_harness/cli.py`: Typer CLI entry points for `init-config`, `plan`, `run`, `report`, `diff`, `chat`, `resume`, and `mcp-server`.
+- `testing_agent_harness/chat.py`: interactive chat interface with commands such as `/repo`, `/plan`, `/run`, `/report`, and `/diff`.
+- `testing_agent_harness/harness.py`: orchestration layer for typed run state, budgets, sandboxing, rollback, routing, repair, and reporting.
+- `testing_agent_harness/tools.py`: deterministic tools such as `project_scan`, `run_tests`, `run_coverage`, `failure_parse`, `apply_changes`, and `diff_workspace`.
+- `testing_agent_harness/models.py`: provider implementations for `openai_compatible`, `gemini`, and `mock`.
+- `testing_agent_harness/schemas.py`: Pydantic schemas for plans, route decisions, failures, patches, reports, and run state.
+- `testing_agent_harness/config.py`: YAML-backed runtime configuration.
+- `testing_agent_harness/mcp_server.py`: experimental MCP-style stdio bridge.
 
-## Architecture at a glance
+### Bundled benchmarks
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│                         Harness                              │
-│  state · budgets · sandbox · diff · rollback · logs          │
-└───────────────┬───────────────────────────┬──────────────────┘
-                │                           │
-        ┌───────▼────────┐         ┌────────▼────────┐
-        │   Tools (py)   │         │  Skills (LLM)   │
-        │ project_scan   │         │ plan_builder    │
-        │ run_tests      │         │ workflow_router │
-        │ run_coverage   │         │ test_generation │
-        │ failure_parse  │         │ bug_localizer   │
-        │ apply_changes  │         │ repair_patch    │
-        │ diff_workspace │         │ final_judge     │
-        │ ...            │         │ report_writer   │
-        └────────────────┘         └─────────────────┘
-                                            │
-                                   ┌────────▼────────┐
-                                   │    Provider     │
-                                   │ openai_compat.  │ ← Ollama / vLLM / LM Studio
-                                   │ gemini (opt.)   │
-                                   │ mock (tests)    │
-                                   └─────────────────┘
+- `examples/buggy_calc/`: one failing test at baseline; repair changes `return a - b` to `return a + b`.
+- `examples/buggy_snake/`: two failing tests at baseline; repair changes wall-boundary logic and snake-growth logic in `src/terminal_snake/game.py`.
+
+### Run artifacts
+
+Each harness run writes artifacts under:
+
+```text
+<repo-under-test>/.testing_agent_runs/<run_id>/
 ```
 
----
+Typical artifacts include:
 
-## Quick start
+- `state.json`
+- `events.jsonl`
+- `plan.json`
+- `reports/final_report.md`
+- `reports/final_report.json`
+- `sandbox/`
 
-### 1. One-click (recommended)
+These artifacts are part of the project’s reproducibility story and are explicitly discussed in the paper.
+
+## External Software And Artifacts Built On
+
+The project builds on standard open-source Python testing and CLI infrastructure plus local model-serving software:
+
+- `pytest`
+- `coverage.py`
+- `Typer`
+- `Pydantic`
+- `PyYAML`
+- local OpenAI-compatible LLM servers such as `Ollama`
+
+The final paper emphasizes local `Qwen3` served through an OpenAI-compatible endpoint such as Ollama. `Gemini` compatibility remains in the code from earlier experiments, but the final design emphasizes local Qwen3 and the deterministic mock provider for reproducible testing.
+
+## Build
+
+### Recommended setup
+
+From the repository root:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+This is the setup sequence shown in the paper’s deliverables and reproducibility sections.
+
+### Convenience bootstrap
+
+The repository also includes:
 
 ```bash
 ./start.sh
 ```
 
-What it does:
+`start.sh` creates the virtual environment if needed, installs the package in editable mode, loads `.env`, and starts the interactive CLI path.
 
-- creates `.venv/` if missing
-- `pip install -e .`
-- loads `.env`
-- launches the interactive chat REPL (provider = `openai_compatible`, model = `qwen3` by default)
+### Test the harness repository itself
 
-Inside the chat:
+The final paper reports that after the final modifications the harness pytest suite reports:
 
-```
-you> /repo examples/buggy_calc
-you> /run
+```text
+40 passed
 ```
 
-You'll see per-stage headers, **live-streamed LLM tokens** (dimmed, `<think>…</think>` folded into grey), and a final Markdown report with sandbox diff.
-
-### 2. Manual
+Run it with:
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e .
-cp .env.example .env          # fill in values (local Qwen3 defaults work out of the box with Ollama)
-python -m testing_agent_harness.cli chat --repo examples/buggy_calc
+pytest -q
 ```
 
----
+Pytest may also report three collection warnings for classes whose names begin with `Test`; the paper notes that these warnings do not affect execution.
 
-## Interactive chat commands
+## Run
 
-Inside the REPL (`start.sh` or `cli chat`):
+### Non-interactive benchmark run
 
-| Command | What it does |
-|---|---|
-| `/repo <path>` | switch the target repository |
-| `/plan` | only build a plan (no code changes) |
-| `/run` | full pipeline: plan → baseline → route → localize → repair → iterate → report |
-| `/report` | show the latest Markdown report |
-| `/diff` | show the latest sandbox diff |
-| `/model` | print active provider + model |
-| `/ls [path]` | list files inside the current repo |
-| `/history` | show previous messages in this session |
-| `/help` | list every command |
-| `/quit` | exit |
+The paper uses this form as the canonical example:
 
-Free-form text also works — anything that isn't a `/command` is sent to the LLM as a normal chat turn, streamed in real-time.
+```bash
+python -m testing_agent_harness.cli run examples/buggy_calc --provider mock --repair-mode auto -n
+```
 
----
+This runs the full workflow non-interactively on the bundled benchmark.
 
-## Connecting a local Qwen3 (default path)
+### Interactive chat mode
 
-The harness speaks the standard **OpenAI Chat Completions** protocol, so any of these work without code changes:
+You can also launch the interactive interface and use commands such as:
 
-| Server | Typical `base_url` | Notes |
-|---|---|---|
-| Ollama | `http://127.0.0.1:11434/v1` | default; run `ollama pull qwen3` first |
-| vLLM | `http://127.0.0.1:8000/v1` | set `model_name` to the served checkpoint id |
-| LM Studio | `http://127.0.0.1:1234/v1` | enable the "Local Server" tab |
-| llama.cpp server | `http://127.0.0.1:8080/v1` | `./server -m qwen3.gguf --api-server` |
+```text
+/repo examples/buggy_calc
+/plan
+/run
+/report
+/diff
+```
 
-Config lives in the target repo's `.testing_agent.yaml`:
+### Local Qwen3 configuration
+
+For local-Qwen runs, the paper describes using an OpenAI-compatible server such as Ollama at:
+
+```text
+http://127.0.0.1:11434/v1
+```
+
+An example configuration in the paper is:
 
 ```yaml
 model:
   provider: openai_compatible
-  model_name: qwen3              # or qwen3:4b, qwen3:8b, etc.
+  model_name: qwen3
   base_url: http://127.0.0.1:11434/v1
-  api_key_env: OPENAI_API_KEY    # leave unset if server has no auth
-  timeout_seconds: 300
-  max_output_tokens: 1536
-  num_ctx: 4096
-
 budget:
-  fast_mode: true                # replace narrative skills with deterministic logic
+  fast_mode: true
   max_iterations: 1
-  max_runtime_minutes: 5
-
 policy:
-  repair_mode: auto              # suggest_only | ask | auto
-  stop_when_tests_pass: true
+  repair_mode: auto
+  apply_accepted_patch_to_original: false
 ```
 
-### Why `fast_mode`
+By default, accepted changes remain in the sandbox unless the user explicitly asks to copy them back to the original repository.
 
-Small local models (e.g. `qwen3:4b`) are too slow to drive every orchestration step. When `fast_mode: true`, the harness replaces purely-narrative skills (`plan_reviewer`, `workflow_router`, `failure_localizer`, `repair_decider`, `final_judge`, `report_writer`) with deterministic Python logic, and only uses the LLM where it actually matters (`plan_builder`, `test_generation`, `bug_localizer`, `repair_patch`). Runs drop from 30+ min to well under 5.
+## Evaluation Overview
 
----
+The detailed replication guide is in [`docs/evaluation.md`](docs/evaluation.md).
 
-## Safe repair behavior
+The final paper evaluates the system on two bundled Python benchmarks:
 
-Every run happens in an isolated **sandbox copy** of your repo under `.testing_agent_runs/<run_id>/sandbox/`. The original source is never mutated automatically.
+- `examples/buggy_calc`
+- `examples/buggy_snake`
 
-Built-in safety rails:
+It compares three conditions on the same repositories:
 
-- **Path validation** — every path the LLM produces (for localization or patching) is resolved against `project_scan.source_files`. Hallucinated paths (e.g. `src/core.py` when the real file is `src/buggy_calc/core.py`) are either remapped by basename or dropped.
-- **No net-new source files from `repair_patch`** — repair can only overwrite files that already exist in the sandbox.
-- **Auto-revert** — after a patch, tests rerun. If the repair didn't strictly reduce failures, the harness reverts every touched file from its pre-patch snapshot. `failed_repair_count` gets incremented so the report stays honest.
-- **Regression gate** for `iterative_improvement` — generated tests are only kept if the full suite still passes.
-- **Full diff** appears in the final report so you can choose to copy changes back manually.
+1. existing tests only
+2. suggest-only harness
+3. full harness
 
----
+The reported result is:
 
-## End-to-end example (included)
+- existing tests only: `0/2` repositories fixed
+- suggest-only harness: `0/2` repositories fixed
+- full harness: `2/2` repositories fixed
 
-`examples/buggy_calc/` is a tiny Python package with a real bug. Demo:
+The paper’s case-study results also report:
 
-```bash
-# 1. Start the chat
-./start.sh
+- `buggy_calc`: failures reduced from `1` to `0`, final coverage `47.62%`
+- `buggy_snake`: failures reduced from `2` to `0`, final coverage `77.59%`
 
-# 2. Inside the chat
-you> /repo examples/buggy_calc
-you> /run
-```
+## Safety And Control Behavior
 
-The included `core.py` has `add(a, b)` returning `a - b`. Expected output (condensed):
+The final paper emphasizes the following design properties:
 
-```
-● planning          ▸ plan_builder      {…streamed JSON plan…}  ✓
-● baseline_execution                                             ✓
-● routing                                                        ✓
-● localization      ▸ bug_localizer     {"candidates":[{"path":"src/buggy_calc/core.py","confidence":0.8,…}]}  ✓
-● repair            ▸ repair_patch      {"changes":[{"path":"src/buggy_calc/core.py","content":"…a + b…"}]}    ✓
-● iterative_improvement ▸ test_generation   {"files":[{"path":"tests/test_core_generated.py",…}]}              ✓
-● finalization                                                   ✓
+- sandbox-first execution so the original repository is preserved by default
+- typed run state and persisted artifacts for reproducibility
+- explicit repair modes: `suggest_only`, `ask`, and `auto`
+- path validation for model-generated file paths
+- regression testing after repair
+- rollback or rejection behavior for bad patches
+- normalization layers and deterministic fallbacks around LLM outputs
 
-Goal achieved: True
-Tests passed · coverage 100.00% · 1 repair · 1 generated test file
-```
+The key contribution is not just another test-generation prompt. It is a process-driven harness in which deterministic tools own execution, safety, and state, while the LLM is limited to constrained reasoning tasks with structured outputs.
 
----
+## Documentation Handoff
 
-## Full CLI (non-interactive)
+A third party taking over the project should start with:
 
-```bash
-# Initialize a config file in the target repo
-python -m testing_agent_harness.cli init-config /path/to/repo
+1. `README.md`
+2. `ARCHITECTURE.md`
+3. `testing_agent_harness/`
+4. `examples/buggy_calc/` and `examples/buggy_snake/`
+5. `tests/`
+6. `docs/evaluation.md`
+7. `docs/ai_usage.md`
 
-# Plan only (no code changes)
-python -m testing_agent_harness.cli plan /path/to/repo --provider openai_compatible
-
-# Full run
-python -m testing_agent_harness.cli run  /path/to/repo --provider openai_compatible --repair-mode auto
-
-# Latest report / diff
-python -m testing_agent_harness.cli report /path/to/repo
-python -m testing_agent_harness.cli diff   /path/to/repo
-
-# MCP-style stdio bridge (exposes tools + skill prompts over the MCP transport)
-python -m testing_agent_harness.cli mcp-server /path/to/repo --provider openai_compatible
-```
-
-Gemini is still supported for backwards compatibility:
-
-```bash
-export GEMINI_API_KEY=...
-python -m testing_agent_harness.cli run /path/to/repo --provider gemini --repair-mode auto
-```
-
----
-
-## Environment variables
-
-Everything lives in `.env` (gitignored). Copy from `.env.example`:
-
-```bash
-cp .env.example .env
-```
-
-| Variable | Purpose | Default |
-|---|---|---|
-| `OLLAMA_BASE_URL` | OpenAI-compatible endpoint for the local server | `http://127.0.0.1:11434/v1` |
-| `QWEN_MODEL` | Model id passed to the server | `qwen3` |
-| `OPENAI_API_KEY` | Only set if your local server enforces a bearer token | *(unset)* |
-| `GEMINI_API_KEY` | Only needed for the optional `gemini` provider | *(unset)* |
-| `TEST_AGENT_PROVIDER` | Default provider for `start.sh` | `openai_compatible` |
-| `TEST_AGENT_MODE` | `chat` or `run` for `start.sh` | `chat` |
-| `TEST_AGENT_REPO` | Optional default repo path for `start.sh` | *(current dir / example)* |
-
----
-
-## Layout
-
-```
-testing_agent_harness/
-├── cli.py            # CLI entry points (typer)
-├── chat.py           # interactive REPL + live token streaming
-├── harness.py        # orchestration, state, sandbox, rollback
-├── tools.py          # deterministic tools
-├── models.py         # provider impls (openai_compatible, gemini, mock)
-├── prompts/          # skill prompt + schema YAMLs
-├── schemas.py        # pydantic models for plans, results, diffs
-├── config.py         # user-facing config (model/budget/policy/goals)
-└── mcp_server.py     # stdio MCP-style bridge (optional)
-examples/buggy_calc/  # walk-through fixture
-tests/                # harness + provider unit tests
-start.sh              # one-click launcher
-.env.example          # template (real .env is gitignored)
-```
-
----
-
-## Artifacts per run
-
-```
-<repo>/.testing_agent_runs/<run_id>/
-├── state.json                 # full run state snapshot
-├── events.jsonl               # every stage/skill/tool event
-├── plan.json                  # the generated plan
-├── sandbox/                   # isolated working copy
-└── reports/
-    ├── final_report.md
-    └── final_report.json
-```
-
----
-
-## Tests
-
-```bash
-python -m pytest
-```
-
-Covers: harness orchestration, path validation, auto-revert, mock provider, OpenAI-compatible provider (mocked HTTP), MCP bridge.
-
----
-
-## Status
-
-- Local Qwen3 (Ollama) — **validated end-to-end** against `examples/buggy_calc` (bug injection → localization → patch → green).
-- Gemini provider — ships with exponential-backoff retry, but live API validation must be done from a network-enabled environment.
-- Mock provider — fully deterministic, used by the test suite.
+The repository is intended to be inspectable and reproducible, not just demoable from a terminal session.
